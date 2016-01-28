@@ -1,17 +1,38 @@
-#' Creates a continuous possibility market.
+setwd("/Users/amckenz/Documents/rmarketmaker/")
+
+#' Creates a continuous possibility market class
 #' By default, all options
 #' @param names_outcomes A character vector specifying the names of the possible outcomes in the market.
-#' @param initial_probs Optional numeric vector specifying the initial probabilities of the outcomes referred to in the same order as in names_outcomes.
+#' @param initial_shares Optional numeric vector specifying the initial shares (and thus probabilities) of the outcomes referred to in the same order as in names_outcomes.
 #'
-initialize_market <- function(names_outcomes, initial_probs = NULL){
-  n_outcomes = length(names_outcomes)
-  if(!is.null(initial_probs)){
-      probs = initial_probs
+#' @export 
+initialize_market <- function(names_outcomes, participants, liquidity,
+  initial_shares = NULL){
+
+  if(!is.null(initial_shares)){
+      market = get_current_prices(liquidity, initial_shares)
   } else {
-    probs = rep(1/n_outcomes, n_outcomes)
+    initial_shares = rep(0, length(names_outcomes))
+    market = get_current_prices(liquidity, initial_shares)
   }
-  names(probs) = names_outcomes
-  return(probs)
+  names(market) = names_outcomes
+
+  shares_record = matrix(0, nrow = length(participants), ncol = length(names_outcomes))
+  colnames(shares_record) = names_outcomes
+  rownames(shares_record) = participants
+
+  pot_record = numeric(length(participants))
+  names(pot_record) = participants
+
+  market = structure(list(
+    market = market,
+    liquidity = liquidity,
+    shares_record = shares_record,
+    pot_record = pot_record),
+    class = "market")
+
+  return(market)
+
 }
 
 #this is assuming that the baseline is uniform...
@@ -47,48 +68,73 @@ get_current_prices <- function(liquidity, net_trades){
 #record of how much (matrix, rows = option names, columns = participant names)
 #current prices (named vector)
 
-
 #'probs is a matrix, with
-update_market_step <- function(probs, market, net_shares,
-  liquidity, pot_record, shares_record, participants){
+update_market_step <- function(market, probs){
 
   #create a matrix of shares bought based on the current market prices
-  shares_matrix = sweep(probs, MARGIN = 2, market, `*`)
-
-  #aggregate the shares matrix across rows for each participant to handle multiple entrie
-  shares_matrix = t(sapply(by(M, rownames(M), colSums), identity))
+  shares_matrix = sweep(probs, MARGIN = 2, market[["market"]], `*`)
+  rownames(shares_matrix) = rownames(probs)
 
   #sum the shares matrix across rows for all participants to use to update the prices
   shares_total = colSums(shares_matrix)
+
+  #get the net shares from the shares record
+  net_shares = colSums(market[["shares_record"]])
 
   #update net shares
   net_shares = net_shares + shares_total
 
   #update market prices
-  market = get_current_prices(liquidity, net_shares)
+  market[["market"]] = get_current_prices(market[["liquidity"]], net_shares)
+
+  shares_record = market[["shares_record"]]
 
   #update the number of shares for each participant
-  for(i in participants){
+  for(i in rownames(shares_record)){
     #find the numeric vector of shares for each participant, add it to the record for that participant
-    shares_record[rownames(shares_record) %in% i, ] = shares_matrix[rownames(shares_matrix) %in% i, ] +
-      shares_record[rownames(shares_record) %in% i, ]
+    # print(i)
+    # print(shares_matrix)
+    # print(rownames(shares_matrix))
+    # print(head(shares_record))
+    # print(rownames(shares_record))
+    if(i %in% rownames(shares_matrix)){
+      shares_record[rownames(shares_record) %in% i, ] =
+        shares_matrix[rownames(shares_matrix) %in% i, ] +
+        shares_record[rownames(shares_record) %in% i, ]
+    }
   }
+
+  market[["shares_record"]] = shares_record
+
+  pot_record = market[["pot_record"]]
 
   #update the pot amount for each participant
   for(i in participants){
     n_pots = nrow(probs[, , drop = FALSE])
-    pot_record[names(pot_record) %in% i] = pot_record[names(pot_record) %in% i] + n_pots
+    pot_record[names(pot_record) %in% i] =
+      pot_record[names(pot_record) %in% i] + n_pots
   }
 
-  return(list(
-    market = market,
-    net_shares = net_shares,
-    pot_record = pot_record,
-    shares_record = shares_record))
+  market[["pot_record"]] = pot_record
+
+  return(market)
 
 }
 
-initialize_market(seq(1400, 1600, by = 10))
-
+outcomes = seq(1400, 1600, by = 10)
+participants = letters[1:5]
 liquidity_test = 20
-net_trades_vec = c(rep(1.5, 5), rep(10, 4), rep(50, 2), rep(10, 4), rep(1, 5))
+
+test_shares = read.table("test_shares.txt", row.names = 1,
+  sep = '\t', fill = TRUE)
+
+zeroth_step = initialize_market(outcomes, participants, liquidity = liquidity_test)
+
+first_step = update_market_step(probs = as.matrix(test_shares),
+  market = zeroth_step)
+
+second_step = update_market_step(probs = as.matrix(test_shares),
+  market = first_step)
+
+third_step = update_market_step(probs = as.matrix(test_shares),
+    market = second_step)

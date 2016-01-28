@@ -1,11 +1,6 @@
 
 #'
 
-get_log_cost <- function(liquidity, trades){
-  cost = liquidity * log(sum(exp(/liquidity)))
-  return(cost)
-}
-
 ###
 get_current_prices <- function(liquidity, net_trades){
   price_each = exp(net_trades/liquidity)
